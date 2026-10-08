@@ -16,14 +16,15 @@ import psutil
 from dateutil.rrule import MONTHLY, rrule
 from lxml import etree
 
-from odoo import _, api, exceptions, fields, models, release
+from odoo import api, exceptions, fields, models, release
 from odoo.tools import file_path
+from odoo.tools.constants import PREFETCH_MAX
 
 
 def chunks(items, n=None):
     """Yield successive n-sized chunks from items."""
     if n is None:
-        n = models.PREFETCH_MAX
+        n = PREFETCH_MAX
     for i in range(0, len(items), n):
         yield items[i : i + n]
 
@@ -126,11 +127,11 @@ class XafAuditfileExport(models.Model):
         if "name" in fields_list:
             defaults.setdefault(
                 "name",
-                _("Auditfile %(company_name)s %(current_datetime)s")
-                % {
-                    "company_name": company.name,
-                    "current_datetime": datetime.now().strftime("%Y"),
-                },
+                self.env._(
+                    "Auditfile %(company_name)s %(current_datetime)s",
+                    company_name=company.name,
+                    current_datetime=datetime.now().strftime("%Y"),
+                ),
             )
         return defaults
 
@@ -139,7 +140,7 @@ class XafAuditfileExport(models.Model):
         for auditfile in self:
             if auditfile.date_start >= auditfile.date_end:
                 raise exceptions.ValidationError(
-                    _("Starting date must be anterior ending date!")
+                    self.env._("Starting date must be anterior ending date!")
                 )
 
     @staticmethod
@@ -153,12 +154,21 @@ class XafAuditfileExport(models.Model):
         This is a near-copy of ir.qweb#_render up until joining the generated fragments
         to one big string.
         """
+        values = dict(values or {})
         irQweb = (
-            self.env["ir.qweb"].with_context(**options)._prepare_environment(values)
+            self.env["ir.qweb"]
+            .with_context(**options)
+            ._prepare_environment(values)
+            .with_context(
+                __qweb_loaded_functions={},
+                __qweb_loaded_codes={},
+                __qweb_loaded_options={},
+                _qweb_error_path_xml=[None, None, None],
+            )
         )
-        template_functions, def_name = irQweb._compile(template)
-        render_template = template_functions[def_name]
-        return render_template(irQweb, values)
+        root_values = values.copy()
+        values["__qweb_root_values"] = root_values["__qweb_root_values"] = root_values
+        return irQweb._render_iterall(template, None, values)
 
     def _get_auditfile_attachment(self, create=True):
         self.ensure_one()
